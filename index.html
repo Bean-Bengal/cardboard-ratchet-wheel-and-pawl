@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cardboard Ratchet</title>
+<style>
+body{margin:0;font-family:Georgia,serif;background:#f3e9d2;color:#3a2a18;padding:12px;max-width:640px;margin:auto}
+h1{font-size:1.3rem;margin:.2em 0}
+h2{font-size:1.05rem;margin:.8em 0 .2em}
+#banner,#banner2{padding:6px 10px;border-radius:6px;font-size:.9rem;margin:6px 0}
+.ok{background:#cfe8c0}.bad{background:#f1b7ad}
+canvas{width:100%;max-width:520px;background:#fffaf0;border:2px dashed #a67c4a;border-radius:8px;display:block;margin:auto;touch-action:none}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+button{font:inherit;padding:8px 12px;border:2px solid #7a5428;background:#d9b98a;border-radius:6px;cursor:pointer}
+button:focus{outline:3px solid #2a6;outline-offset:2px}
+#log{font-size:.95rem;min-height:3em}
+table{border-collapse:collapse;width:100%;font-size:.85rem;background:#fffaf0}
+th,td{border:1px solid #a67c4a;padding:3px 5px;text-align:center}
+td.y{background:#cfe8c0}td.n{background:#f1b7ad}
+.wrap{overflow-x:auto}
+</style></head><body>
+<h1>Cardboard ratchet: wheel and pawl</h1>
+<div id="banner" role="status">checking…</div>
+<div id="banner2" role="status">checking boundaries…</div>
+<canvas id="c" width="520" height="520" aria-label="ratchet wheel with pawl"></canvas>
+<div class="row"><label for="n">Teeth: <b id="nv">12</b></label>
+<input id="n" type="range" min="6" max="24" value="12"></div>
+<div class="row">
+<button id="fwd">Turn forward one tooth</button>
+<button id="back">Try backward</button>
+<button id="reset">Reset</button></div>
+<p id="log" aria-live="polite">Forward lets the pawl ride up each slope and drop in with a click. Backward, the pawl sits against a flat face and stops.</p>
+<p>Clicks: <b id="clicks">0</b> &middot; Blocked backward tries: <b id="blocks">0</b> &middot; Tooth pitch: <b id="pitch"></b></p>
+
+<h2>Does the pause hold?</h2>
+<p style="font-size:.9rem;margin:.2em 0">Model: wheel turns 2° per tick, the tooth is 40 px deep, the spring arm pulls the pawl tip down at a set speed (tight 10, medium 6, loose 3 px per tick) once the tip passes the top of the tooth. The pause holds if the pawl is fully seated before the wheel finishes the tooth. The number is the margin in ticks (negative means it landed late).</p>
+<div class="row"><button id="run">Run check again</button></div>
+<div class="wrap"><table id="tbl" aria-label="pause check results"></table></div>
+<p id="sum" aria-live="polite"></p>
+
+<script>
+const $=id=>document.getElementById(id);
+function pitchOf(n){return 360/n}
+function tryMove(angle,delta,n){
+  const p=pitchOf(n);
+  if(delta>0){
+    const na=angle+delta;
+    const clicked=Math.floor(na/p+1e-9)>Math.floor(angle/p+1e-9);
+    return {moved:true,clicked,newAngle:na};
+  }
+  const faceAngle=Math.floor(angle/p+1e-9)*p;
+  const na=Math.max(angle+delta,faceAngle);
+  return {moved:na!==angle,clicked:false,newAngle:na,blocked:na>angle+delta};
+}
+// The one comparison: seated exactly when the tooth ends still counts as holding.
+function holdsRule(seat,tEnd){return seat<=tEnd+1e-9}
+// Deliberately wrong copy (off by one at the boundary: < instead of <=). Must fail the edge checks.
+function holdsRuleBroken(seat,tEnd){return seat<tEnd-1e-9}
+function pawlRunWith(rule,n,k,w){
+  w=w||2;const p=pitchOf(n),D=40;
+  const tEnd=p/w,t1=0.85*p/w;
+  const seat=k>0?t1+D/k:Infinity;
+  return {margin:tEnd-seat,holds:rule(seat,tEnd)};
+}
+function pawlRun(n,k,w){return pawlRunWith(holdsRule,n,k,w)}
+// Arm speed where seat equals tEnd exactly: D/k = 0.15p/w
+function tieSpeed(n,w){w=w||2;return 40/(0.15*pitchOf(n)/w)}
+const ARMS=[['tight',10],['medium',6],['loose',3]];
+function pauseTable(counts){
+  return counts.map(n=>({n,res:ARMS.map(a=>({arm:a[0],...pawlRun(n,a[1])}))}));
+}
+function boundaryChecks(rule){
+  const r=[];
+  r.push(['tie holds',rule(10,10)]);
+  r.push(['just late fails',!rule(10.01,10)]);
+  r.push(['just early holds',rule(9.99,10)]);
+  for(let n=6;n<=24;n++){
+    const k=tieSpeed(n);
+    r.push(['tie speed holds @'+n,pawlRunWith(rule,n,k).holds]);
+    r.push(['slightly slower fails @'+n,!pawlRunWith(rule,n,k*0.999).holds]);
+    r.push(['slightly faster holds @'+n,pawlRunWith(rule,n,k*1.001).holds]);
+  }
+  return r;
+}
+function selfTest(){
+  const r=[];
+  for(const n of [6,12,24]){
+    const p=pitchOf(n);
+    r.push(['pitch*n=360 @'+n,Math.abs(p*n-360)<1e-9]);
+    let m=tryMove(p*2,-p*0.5,n);
+    r.push(['backward from face stays @'+n,m.newAngle===p*2&&m.blocked]);
+    m=tryMove(p*2+p*0.5,-p,n);
+    r.push(['backward stops at face @'+n,Math.abs(m.newAngle-p*2)<1e-9]);
+    m=tryMove(p*2-0.001,p*0.01,n);
+    r.push(['forward over edge clicks @'+n,m.clicked===true]);
+    m=tryMove(p*2+0.1,p*0.1,n);
+    r.push(['forward inside tooth no click @'+n,m.clicked===false]);
+  }
+  for(let n=6;n<=24;n++){
+    const a=pawlRun(n,10).margin,b=pawlRun(n,6).margin,c=pawlRun(n,3).margin;
+    r.push(['tighter arm gives bigger margin @'+n,a>=b-1e-6&&b>=c-1e-6]);
+  }
+  r.push(['very stiff arm holds @6',pawlRun(6,1000).holds]);
+  r.push(['slack arm fails @24',!pawlRun(24,0.5).holds]);
+  r.push(['zero arm fails and ends',!pawlRun(12,0).holds]);
+  const m=pawlRun(6,10).margin,expect=(60/2)-(0.85*60/2)-40/10;
+  r.push(['margin matches hand calc @6 tight',Math.abs(m-expect)<0.05]);
+  return r;
+}
+function renderTable(){
+  const counts=[];for(let n=6;n<=24;n+=2)counts.push(n);
+  const rows=pauseTable(counts);
+  let h='<tr><th>Teeth</th><th>Pitch</th>'+ARMS.map(a=>'<th>'+a[0]+'</th>').join('')+'</tr>';
+  for(const row of rows){
+    h+='<tr><td>'+row.n+'</td><td>'+pitchOf(row.n).toFixed(1)+'°</td>'+row.res.map(x=>'<td class="'+(x.holds?'y':'n')+'">'+(x.holds?'holds':'late')+' ('+x.margin.toFixed(1)+')</td>').join('')+'</tr>';
+  }
+  $('tbl').innerHTML=h;
+  const parts=ARMS.map((a,i)=>{const ok=rows.filter(r=>r.res[i].holds).map(r=>r.n);
+    return a[0]+': holds at '+(ok.length?ok.join(', '):'no tested count');});
+  $('sum').textContent='Result. '+parts.join('. ')+'.';
+}
+const cv=document.getElementById('c'),g=cv.getContext('2d');
+let n=12,angle=0,clicks=0,blocks=0,pawlLift=0;
+function draw(){
+  const W=520,cx=260,cy=280,R=190,r=150,p=pitchOf(n);
+  g.clearRect(0,0,W,W);
+  g.save();g.translate(cx,cy);g.rotate(angle*Math.PI/180);
+  g.beginPath();
+  for(let i=0;i<n;i++){
+    const a0=i*p*Math.PI/180;
+    const aTip=(i+0.85)*p*Math.PI/180, a1=(i+1)*p*Math.PI/180;
+    const pt=(a,rad)=>[Math.sin(a)*rad,-Math.cos(a)*rad];
+    if(i==0)g.moveTo(...pt(a0,r));
+    g.lineTo(...pt(aTip,R));g.lineTo(...pt(a1,r));
+  }
+  g.closePath();g.fillStyle='#c99a5b';g.fill();g.lineWidth=3;g.strokeStyle='#7a5428';g.stroke();
+  g.fillStyle='#fffaf0';g.beginPath();g.arc(0,0,30,0,7);g.fill();g.stroke();
+  g.fillStyle='#7a5428';g.font='bold 14px Georgia';g.textAlign='center';g.textBaseline='middle';
+  for(let i=0;i<n;i++){const a=(i+0.5)*p*Math.PI/180;g.fillText(i+1,Math.sin(a)*(r-18),-Math.cos(a)*(r-18));}
+  g.restore();
+  g.save();g.strokeStyle='#555';g.fillStyle='#fff';g.lineWidth=3;
+  g.beginPath();g.moveTo(cx+150,cy-R-60);g.lineTo(cx+8,cy-r-4-pawlLift+ (R-r)*0.3);g.lineTo(cx+8,cy-r-24-pawlLift);g.lineTo(cx+150,cy-R-82);g.closePath();g.fill();g.stroke();
+  g.beginPath();g.arc(cx+150,cy-R-71,6,0,7);g.fillStyle='#d44';g.fill();g.restore();
+}
+function flash(msg){$('log').textContent=msg}
+function update(){$('nv').textContent=n;$('clicks').textContent=clicks;$('blocks').textContent=blocks;$('pitch').textContent=pitchOf(n).toFixed(1)+'°';draw()}
+function anim(from,to,done){
+  const t0=performance.now(),d=250;
+  (function f(t){const k=Math.min(1,Math.max(0,(t-t0)/d));angle=from+(to-from)*k;pawlLift=Math.sin(k*Math.PI)*14;update();
+    if(k<1)requestAnimationFrame(f);else{pawlLift=0;update();done&&done()}})(t0);
+}
+$('fwd').onclick=()=>{const p=pitchOf(n);const target=(Math.floor(angle/p+1e-9)+1)*p;const m=tryMove(angle,target-angle,n);
+  anim(angle,m.newAngle,()=>{if(m.clicked){clicks++;flash('Click. Pawl rode the slope and dropped behind the face.')}update()})};
+$('back').onclick=()=>{const m=tryMove(angle,-pitchOf(n)*0.8,n);
+  const wasAt=angle;
+  if(m.blocked){blocks++;flash(m.moved?'Slipped back a bit, then the pawl caught the flat face. Locked.':'Nothing. Pawl is jammed on the flat face.')}
+  anim(wasAt,m.newAngle,update)};
+$('reset').onclick=()=>{angle=0;clicks=0;blocks=0;flash('Reset.');update()};
+$('n').oninput=e=>{n=+e.target.value;angle=0;clicks=0;blocks=0;flash(n+' teeth, each '+pitchOf(n).toFixed(1)+'° apart. More teeth means a smaller click but less slip.');update()};
+$('run').onclick=renderTable;
+try{const res=selfTest(),f=res.filter(x=>!x[1]);const b=$('banner');
+ b.className=f.length?'bad':'ok';b.textContent=f.length?'Self-test FAILED: '+f.map(x=>x[0]).join(', '):'Self-test passed ('+res.length+' checks)';}
+catch(e){$('banner').className='bad';$('banner').textContent='Self-test error: '+e.message}
+try{
+ const real=boundaryChecks(holdsRule),realFail=real.filter(x=>!x[1]);
+ const broken=boundaryChecks(holdsRuleBroken),brokenFail=broken.filter(x=>!x[1]);
+ const b2=$('banner2');
+ if(realFail.length){b2.className='bad';b2.textContent='Boundary checks FAILED on the real rule: '+realFail.slice(0,4).map(x=>x[0]).join(', ')}
+ else if(!brokenFail.length){b2.className='bad';b2.textContent='Checker is broken: the off-by-one copy passed every boundary check.'}
+ else{b2.className='ok';b2.textContent='Boundary checks passed ('+real.length+'). The off-by-one copy failed '+brokenFail.length+' of '+broken.length+', as it should.'}
+}catch(e){$('banner2').className='bad';$('banner2').textContent='Boundary test error: '+e.message}
+try{renderTable()}catch(e){$('sum').textContent='Table error: '+e.message}
+update();
+</script></body></html>
