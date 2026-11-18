@@ -5,21 +5,25 @@
 body{margin:0;font-family:Georgia,serif;background:#f3e9d2;color:#3a2a18;padding:12px;max-width:640px;margin:auto}
 h1{font-size:1.3rem;margin:.2em 0}
 h2{font-size:1.05rem;margin:.8em 0 .2em}
-#banner,#banner2{padding:6px 10px;border-radius:6px;font-size:.9rem;margin:6px 0}
+#banner,#banner2,#banner3{padding:6px 10px;border-radius:6px;font-size:.9rem;margin:6px 0}
 .ok{background:#cfe8c0}.bad{background:#f1b7ad}
 canvas{width:100%;max-width:520px;background:#fffaf0;border:2px dashed #a67c4a;border-radius:8px;display:block;margin:auto;touch-action:none}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
 button{font:inherit;padding:8px 12px;border:2px solid #7a5428;background:#d9b98a;border-radius:6px;cursor:pointer}
 button:focus{outline:3px solid #2a6;outline-offset:2px}
+input[type=number]{font:inherit;width:5.5em;padding:4px}
 #log{font-size:.95rem;min-height:3em}
 table{border-collapse:collapse;width:100%;font-size:.85rem;background:#fffaf0}
 th,td{border:1px solid #a67c4a;padding:3px 5px;text-align:center}
 td.y{background:#cfe8c0}td.n{background:#f1b7ad}
 .wrap{overflow-x:auto}
+#calcout{background:#fffaf0;border:2px solid #a67c4a;border-radius:6px;padding:6px 10px;font-size:.95rem}
 </style></head><body>
+<script data-bean-store>(function(){if(typeof location!=='undefined'&&location&&location.protocol==='about:'&&typeof document!=='undefined'&&document.addEventListener){document.addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href^="#"]');if(!a||a.target==='_blank')return;e.preventDefault();try{location.hash=a.getAttribute('href')}catch(x){}},true)}if(typeof window==='undefined')return;try{window.localStorage.getItem('x');return}catch(e){}var d=Object.assign({},window.__BEAN_SAVED||{});function post(){try{parent.postMessage({type:'bean-store',data:d},'*')}catch(e){}}var ls={getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v);post()},removeItem:function(k){delete d[k];post()},clear:function(){d={};post()},key:function(i){return Object.keys(d)[i]||null}};Object.defineProperty(ls,'length',{get:function(){return Object.keys(d).length}});try{Object.defineProperty(window,'localStorage',{value:ls,configurable:true})}catch(e){}})();</script>
 <h1>Cardboard ratchet: wheel and pawl</h1>
 <div id="banner" role="status">checking…</div>
 <div id="banner2" role="status">checking boundaries…</div>
+<div id="banner3" role="status">checking calculator…</div>
 <canvas id="c" width="520" height="520" aria-label="ratchet wheel with pawl"></canvas>
 <div class="row"><label for="n">Teeth: <b id="nv">12</b></label>
 <input id="n" type="range" min="6" max="24" value="12"></div>
@@ -29,6 +33,15 @@ td.y{background:#cfe8c0}td.n{background:#f1b7ad}
 <button id="reset">Reset</button></div>
 <p id="log" aria-live="polite">Forward lets the pawl ride up each slope and drop in with a click. Backward, the pawl sits against a flat face and stops.</p>
 <p>Clicks: <b id="clicks">0</b> &middot; Blocked backward tries: <b id="blocks">0</b> &middot; Tooth pitch: <b id="pitch"></b></p>
+
+<h2>Print calculator: teeth and pitch</h2>
+<p style="font-size:.9rem;margin:.2em 0">Pitch = circumference / teeth, measured around the tip circle. Check the numbers before printing.</p>
+<div class="row">
+<label for="cd">Tip diameter (mm) <input id="cd" type="number" min="1" step="0.5" value="100"></label>
+<label for="ct">Teeth <input id="ct" type="number" min="3" max="200" step="1" value="12"></label>
+<label for="cdp">Tooth depth (mm) <input id="cdp" type="number" min="0" step="0.5" value="6"></label>
+</div>
+<div id="calcout" aria-live="polite"></div>
 
 <h2>Does the pause hold?</h2>
 <p style="font-size:.9rem;margin:.2em 0">Model: wheel turns 2° per tick, the tooth is 40 px deep, the spring arm pulls the pawl tip down at a set speed (tight 10, medium 6, loose 3 px per tick) once the tip passes the top of the tooth. The pause holds if the pawl is fully seated before the wheel finishes the tooth. The number is the margin in ticks (negative means it landed late).</p>
@@ -50,9 +63,7 @@ function tryMove(angle,delta,n){
   const na=Math.max(angle+delta,faceAngle);
   return {moved:na!==angle,clicked:false,newAngle:na,blocked:na>angle+delta};
 }
-// The one comparison: seated exactly when the tooth ends still counts as holding.
 function holdsRule(seat,tEnd){return seat<=tEnd+1e-9}
-// Deliberately wrong copy (off by one at the boundary: < instead of <=). Must fail the edge checks.
 function holdsRuleBroken(seat,tEnd){return seat<tEnd-1e-9}
 function pawlRunWith(rule,n,k,w){
   w=w||2;const p=pitchOf(n),D=40;
@@ -61,7 +72,6 @@ function pawlRunWith(rule,n,k,w){
   return {margin:tEnd-seat,holds:rule(seat,tEnd)};
 }
 function pawlRun(n,k,w){return pawlRunWith(holdsRule,n,k,w)}
-// Arm speed where seat equals tEnd exactly: D/k = 0.15p/w
 function tieSpeed(n,w){w=w||2;return 40/(0.15*pitchOf(n)/w)}
 const ARMS=[['tight',10],['medium',6],['loose',3]];
 function pauseTable(counts){
@@ -105,6 +115,40 @@ function selfTest(){
   r.push(['margin matches hand calc @6 tight',Math.abs(m-expect)<0.05]);
   return r;
 }
+// ---- print calculator ----
+function calcWheel(d,t,depth){
+  const circ=Math.PI*d;
+  const pitch=circ/t;
+  return {circ,pitch,deg:360/t,chord:d*Math.sin(Math.PI/t),depthRatio:pitch>0?depth/pitch:0};
+}
+// Broken twin: uses diameter as if it were the radius
+function calcWheelBroken(d,t,depth){
+  const circ=Math.PI*d/2;
+  return {circ,pitch:circ/t,deg:360/t};
+}
+function calcChecks(fn){
+  const r=[],c=fn(100,12,6);
+  r.push(['100 mm, 12 teeth: circumference 314.16',Math.abs(c.circ-314.159)<0.01]);
+  r.push(['100 mm, 12 teeth: pitch 26.18',Math.abs(c.pitch-26.18)<0.01]);
+  r.push(['12 teeth: 30 degrees',Math.abs(c.deg-30)<1e-9]);
+  r.push(['pitch*teeth = circumference',Math.abs(c.pitch*12-c.circ)<1e-9]);
+  const a=fn(50,12,6),b=fn(100,24,6);
+  r.push(['half diameter, half pitch',Math.abs(a.pitch*2-c.pitch)<1e-9]);
+  r.push(['double teeth, half pitch',Math.abs(b.pitch*2-c.pitch)<1e-9]);
+  return r;
+}
+function calcAdvice(c){
+  if(c.depthRatio>0.6)return 'Teeth are very deep for their pitch (over 60%). They may be weak or the slope too steep.';
+  if(c.pitch<8)return 'Pitch under 8 mm is small for a cardboard or printed tooth. It may not hold.';
+  return 'Proportions look printable.';
+}
+function renderCalc(){
+  const d=+$('cd').value,t=Math.round(+$('ct').value),dp=+$('cdp').value;
+  if(!(d>0)||!(t>=3)){$('calcout').textContent='Enter a diameter above 0 and at least 3 teeth.';return}
+  const c=calcWheel(d,t,dp);
+  $('calcout').innerHTML='Circumference <b>'+c.circ.toFixed(2)+' mm</b><br>Pitch (arc) <b>'+c.pitch.toFixed(2)+' mm</b>, straight chord '+c.chord.toFixed(2)+' mm<br>Angle per tooth <b>'+c.deg.toFixed(2)+'°</b><br>Tooth depth is '+(c.depthRatio*100).toFixed(0)+'% of pitch. '+calcAdvice(c);
+}
+['cd','ct','cdp'].forEach(i=>$(i).oninput=renderCalc);
 function renderTable(){
   const counts=[];for(let n=6;n<=24;n+=2)counts.push(n);
   const rows=pauseTable(counts);
@@ -167,6 +211,15 @@ try{
  else if(!brokenFail.length){b2.className='bad';b2.textContent='Checker is broken: the off-by-one copy passed every boundary check.'}
  else{b2.className='ok';b2.textContent='Boundary checks passed ('+real.length+'). The off-by-one copy failed '+brokenFail.length+' of '+broken.length+', as it should.'}
 }catch(e){$('banner2').className='bad';$('banner2').textContent='Boundary test error: '+e.message}
+try{
+ const real=calcChecks(calcWheel),rf=real.filter(x=>!x[1]);
+ const bro=calcChecks(calcWheelBroken),bf=bro.filter(x=>!x[1]);
+ const b3=$('banner3');
+ if(rf.length){b3.className='bad';b3.textContent='Calculator FAILED: '+rf.map(x=>x[0]).join(', ')}
+ else if(!bf.length){b3.className='bad';b3.textContent='Calculator check is broken: the radius-mistake copy passed.'}
+ else{b3.className='ok';b3.textContent='Calculator matches the known 12-tooth case ('+real.length+' checks). The radius-mistake copy failed '+bf.length+', as it should.'}
+}catch(e){$('banner3').className='bad';$('banner3').textContent='Calculator test error: '+e.message}
+try{renderCalc()}catch(e){$('calcout').textContent='Calculator error: '+e.message}
 try{renderTable()}catch(e){$('sum').textContent='Table error: '+e.message}
 update();
 </script></body></html>
